@@ -1,238 +1,121 @@
-import { Server, Connection, Session } from "ssh2";
-import { readFileSync, existsSync } from "fs";
-import { execSync } from "child_process";
-import { resolve } from "path";
+import * as net from "net";
 import { ClaudeSession } from "./claude";
-import { loadWorld, buildSystemPrompt, buildBootSequence } from "./prompt";
+import { loadWorld, buildSystemPrompt } from "./prompt";
 
-// ── Config ───────────────────────────────────────────────────────
-
-const PORT = parseInt(process.env.SSH_PORT ?? "2222");
-const PASSWORD = process.env.SSH_PASSWORD ?? "jarvis";
-const HOST_KEY_PATH = resolve(__dirname, "../host_key");
-
-// ── World ────────────────────────────────────────────────────────
-
+const PORT = parseInt(process.env.PORT ?? "2222");
 const world = loadWorld();
 const SYSTEM_PROMPT = buildSystemPrompt(world);
-const BOOT_SEQUENCE = buildBootSequence(world);
 
-// ── Host key ─────────────────────────────────────────────────────
+// ── Escape translation ──────────────────────────────────────────
 
-function ensureHostKey(): Buffer {
-  if (!existsSync(HOST_KEY_PATH)) {
-    console.log("Generating host key...");
-    execSync(`ssh-keygen -t ed25519 -f ${HOST_KEY_PATH} -N "" -q`);
-  }
-  return readFileSync(HOST_KEY_PATH);
+function toTerminalBytes(text: string): string {
+  return text
+    .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) =>
+      String.fromCharCode(parseInt(hex, 16))
+    )
+    .replace(/\n/g, "\r\n");
+}
+
+function createAnsiTranslator(write: (bytes: string) => void) {
+  let pending = "";
+  return {
+    push(chunk: string): void {
+      const text = pending + chunk;
+      pending = "";
+      const trailingPartial = text.match(/(\\x[0-9a-fA-F]?|\\)$/);
+      if (trailingPartial) {
+        {
+          const partial = trailingPartial[0];
+          pending = partial;
+          const complete = text.slice(0, -partial.length);
+          if (complete) write(toTerminalBytes(complete));
+          return;
+        }
+      }
+      write(toTerminalBytes(text));
+    },
+    flush(): void {
+      if (pending) {
+        write(toTerminalBytes(pending));
+        pending = "";
+      }
+    },
+  };
 }
 
 // ── Server ───────────────────────────────────────────────────────
+// Raw TCP socket. Claude handles everything: telnet negotiation,
+// boot, prompt, commands. Node only does echo, line buffering,
+// and \xNN byte translation.
 
-function createServer(): Server {
-  const hostKey = ensureHostKey();
+net.createServer((socket) => {
+  socket.setEncoding("utf8");
 
-  const server = new Server({ hostKeys: [hostKey] }, (client) => {
-    console.log("Client connected");
-    handleClient(client);
-  });
-
-  return server;
-}
-
-function handleClient(client: Connection): void {
-  let username = "";
-
-  client.on("authentication", (ctx) => {
-    username = ctx.username;
-    if (ctx.method === "password" && ctx.password === PASSWORD) {
-      console.log(`Auth success: ${username}`);
-      ctx.accept();
-    } else if (ctx.method === "none") {
-      ctx.reject(["password"]);
-    } else {
-      ctx.reject(["password"]);
-    }
-  });
-
-  client.on("ready", () => {
-    console.log(`Session ready: ${username}`);
-
-    client.on("session", (accept) => {
-      const session = accept();
-      handleSession(session, username);
-    });
-  });
-
-  client.on("error", (err) => {
-    console.error("Client error:", err.message);
-  });
-
-  client.on("close", () => {
-    console.log(`Client disconnected: ${username}`);
-  });
-}
-
-// ── Session handler ──────────────────────────────────────────────
-
-function handleSession(session: Session, username: string): void {
-  let stream: any = null;
   const claude = new ClaudeSession({ systemPrompt: SYSTEM_PROMPT });
-  const prompt = () => `${claude.cwd} $ `;
   let inputBuffer = "";
   let isProcessing = false;
-  let cols = 80;
 
-  session.on("pty", (accept, _reject, info) => {
-    cols = info.cols ?? 80;
-    accept?.();
-  });
+  // Tell Claude a new operator connected — it handles the rest
+  processInput("[operator connected]");
 
-  session.on("shell", (accept) => {
-    stream = accept();
+  socket.on("data", (raw: string) => {
+    const data = raw.replace(/\xff[\xfb\xfc\xfd\xfe]./g, "");
+    if (!data) return;
 
-    // Boot sequence
-    writeToStream(stream, BOOT_SEQUENCE);
-    writeToStream(stream, prompt());
+    for (const char of data) {
+      const code = char.charCodeAt(0);
 
-    stream.on("data", (data: Buffer) => {
-      const str = data.toString("utf8");
-      for (const char of str) {
-        handleChar(char);
-      }
-    });
-
-    stream.on("close", () => {
-      console.log("Stream closed");
-    });
-  });
-
-  session.on("window-change", (accept, _reject, info) => {
-    cols = info.cols ?? cols;
-    accept?.();
-  });
-
-  function handleChar(char: string): void {
-    const code = char.charCodeAt(0);
-
-    // Ctrl+C
-    if (code === 3) {
-      if (isProcessing) return;
-      writeToStream(stream, "^C\r\n");
-      writeToStream(stream, prompt());
-      inputBuffer = "";
-      return;
-    }
-
-    // Ctrl+D — disconnect
-    if (code === 4) {
-      writeToStream(stream, "\r\nConnection closed.\r\n");
-      stream.close();
-      return;
-    }
-
-    // Backspace / Delete
-    if (code === 127 || code === 8) {
-      if (inputBuffer.length > 0) {
-        inputBuffer = inputBuffer.slice(0, -1);
-        stream.write("\b \b");
-      }
-      return;
-    }
-
-    // Enter
-    if (char === "\r" || char === "\n") {
-      stream.write("\r\n");
-      const command = inputBuffer.trim();
-      inputBuffer = "";
-
-      if (command === "") {
-        writeToStream(stream, prompt());
-        return;
+      // Backspace
+      if (code === 127 || code === 8) {
+        if (inputBuffer.length > 0) {
+          inputBuffer = inputBuffer.slice(0, -1);
+          socket.write("\b \b");
+        }
+        continue;
       }
 
-      processCommand(command);
-      return;
+      // Enter
+      if (char === "\r" || char === "\n") {
+        socket.write("\r\n");
+        const line = inputBuffer;
+        inputBuffer = "";
+        processInput(line);
+        continue;
+      }
+
+      // Ignore control chars
+      if (code < 32) continue;
+
+      // Echo + buffer
+      if (code < 127) {
+        inputBuffer += char;
+        socket.write(char);
+      }
     }
+  });
 
-    // Tab — ignore
-    if (code === 9) return;
+  socket.on("error", () => { });
+  socket.on("close", () => console.log("Client disconnected"));
 
-    // Escape sequences — ignore
-    if (code === 27) return;
-
-    // Printable characters
-    if (code >= 32 && code < 127) {
-      inputBuffer += char;
-      stream.write(char);
-    }
-  }
-
-  async function processCommand(command: string): Promise<void> {
+  async function processInput(input: string): Promise<void> {
     if (isProcessing) return;
     isProcessing = true;
 
-    // Local commands
-    if (command === "clear") {
-      stream.write("\x1b[2J\x1b[H");
-      writeToStream(stream, prompt());
-      isProcessing = false;
-      return;
-    }
-
-    if (command === "exit" || command === "logout") {
-      writeToStream(stream, "Connection closed.\r\n");
-      setTimeout(() => stream.close(), 500);
-      isProcessing = false;
-      return;
-    }
+    const translator = createAnsiTranslator((bytes) => {
+      if (!socket.destroyed) socket.write(bytes);
+    });
 
     try {
-      await claude.send(command, (chunk) => {
-        // The renderers produce \n — convert to \r\n for the terminal.
-        // No markdown sanitization needed. The typed tool schemas
-        // make markdown structurally impossible.
-        const terminalBytes = chunk.replace(/\n/g, "\r\n");
-        stream.write(terminalBytes);
-      });
+      await claude.send(input, (chunk) => translator.push(chunk));
+      translator.flush();
     } catch (err: any) {
-      writeToStream(
-        stream,
-        `[SYSTEM ERROR] ${err.message}\r\n`
-      );
+      if (!socket.destroyed) {
+        socket.write(`\r\n[ERROR] ${err.message}\r\n`);
+      }
     }
 
-    writeToStream(stream, prompt());
     isProcessing = false;
   }
-}
-
-// ── Helpers ──────────────────────────────────────────────────────
-
-function writeToStream(stream: any, text: string): void {
-  const sanitized = text.replace(/\r?\n/g, "\r\n");
-  stream.write(sanitized);
-}
-
-// ── Main ─────────────────────────────────────────────────────────
-
-const server = createServer();
-
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`
-╔════════════════════════════════════════════╗
-║       SSH-JARVIS Server Running            ║
-╠════════════════════════════════════════════╣
-║                                            ║
-║  Port: ${String(PORT).padEnd(36)}║
-║  Password: ${PASSWORD.padEnd(31)}║
-║                                            ║
-║  ssh operator@localhost -p ${String(PORT).padEnd(14)}║
-║                                            ║
-╚════════════════════════════════════════════╝
-  `);
-});
-
-server.on("error", (err: Error) => {
-  console.error("Server error:", err);
+}).listen(PORT, "0.0.0.0", () => {
+  console.log(`Listening on port ${PORT} — telnet localhost ${PORT}`);
 });
