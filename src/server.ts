@@ -5,21 +5,24 @@ import { resolve } from "path";
 import { ClaudeSession } from "./claude";
 import { BOOT_SEQUENCE } from "./prompt";
 
-// Config
+// ── Config ───────────────────────────────────────────────────────
+
 const PORT = parseInt(process.env.SSH_PORT ?? "2222");
 const PASSWORD = process.env.SSH_PASSWORD ?? "jarvis";
 const HOST_KEY_PATH = resolve(__dirname, "../host_key");
+const PROMPT = "$ ";
 
-// Generate host key if it doesn't exist
+// ── Host key ─────────────────────────────────────────────────────
+
 function ensureHostKey(): Buffer {
   if (!existsSync(HOST_KEY_PATH)) {
     console.log("Generating host key...");
-    execSync(
-      `ssh-keygen -t ed25519 -f ${HOST_KEY_PATH} -N "" -q`
-    );
+    execSync(`ssh-keygen -t ed25519 -f ${HOST_KEY_PATH} -N "" -q`);
   }
   return readFileSync(HOST_KEY_PATH);
 }
+
+// ── Server ───────────────────────────────────────────────────────
 
 function createServer(): Server {
   const hostKey = ensureHostKey();
@@ -65,6 +68,8 @@ function handleClient(client: Connection): void {
   });
 }
 
+// ── Session handler ──────────────────────────────────────────────
+
 function handleSession(session: Session, username: string): void {
   let stream: any = null;
   const claude = new ClaudeSession();
@@ -80,13 +85,12 @@ function handleSession(session: Session, username: string): void {
   session.on("shell", (accept) => {
     stream = accept();
 
-    // Send boot sequence
+    // Boot sequence
     writeToStream(stream, BOOT_SEQUENCE);
+    writeToStream(stream, PROMPT);
 
-    // Handle input byte by byte
     stream.on("data", (data: Buffer) => {
       const str = data.toString("utf8");
-
       for (const char of str) {
         handleChar(char);
       }
@@ -97,7 +101,6 @@ function handleSession(session: Session, username: string): void {
     });
   });
 
-  // Window resize
   session.on("window-change", (accept, _reject, info) => {
     cols = info.cols ?? cols;
     accept?.();
@@ -108,21 +111,16 @@ function handleSession(session: Session, username: string): void {
 
     // Ctrl+C
     if (code === 3) {
-      if (isProcessing) {
-        // Could implement cancellation here
-        return;
-      }
-      writeToStream(stream, "^C\r\n/ > ");
+      if (isProcessing) return;
+      writeToStream(stream, "^C\r\n");
+      writeToStream(stream, PROMPT);
       inputBuffer = "";
       return;
     }
 
     // Ctrl+D — disconnect
     if (code === 4) {
-      writeToStream(
-        stream,
-        "\r\nGoodbye. The suit will miss you.\r\n"
-      );
+      writeToStream(stream, "\r\nGoodbye. The suit will miss you.\r\n");
       stream.close();
       return;
     }
@@ -131,7 +129,6 @@ function handleSession(session: Session, username: string): void {
     if (code === 127 || code === 8) {
       if (inputBuffer.length > 0) {
         inputBuffer = inputBuffer.slice(0, -1);
-        // Move cursor back, overwrite with space, move back
         stream.write("\b \b");
       }
       return;
@@ -144,7 +141,7 @@ function handleSession(session: Session, username: string): void {
       inputBuffer = "";
 
       if (command === "") {
-        writeToStream(stream, "/ > ");
+        writeToStream(stream, PROMPT);
         return;
       }
 
@@ -152,13 +149,13 @@ function handleSession(session: Session, username: string): void {
       return;
     }
 
-    // Tab — ignore for now
+    // Tab — ignore
     if (code === 9) return;
 
-    // Escape sequences (arrow keys etc) — ignore
+    // Escape sequences — ignore
     if (code === 27) return;
 
-    // Regular printable character
+    // Printable characters
     if (code >= 32 && code < 127) {
       inputBuffer += char;
       stream.write(char);
@@ -169,19 +166,16 @@ function handleSession(session: Session, username: string): void {
     if (isProcessing) return;
     isProcessing = true;
 
-    // Handle local commands
+    // Local commands
     if (command === "clear") {
       stream.write("\x1b[2J\x1b[H");
-      writeToStream(stream, "/ > ");
+      writeToStream(stream, PROMPT);
       isProcessing = false;
       return;
     }
 
     if (command === "exit" || command === "logout") {
-      writeToStream(
-        stream,
-        "\r\nPowering down. Stay safe out there.\r\n"
-      );
+      writeToStream(stream, "Powering down. Stay safe out there.\r\n");
       setTimeout(() => stream.close(), 500);
       isProcessing = false;
       return;
@@ -189,36 +183,33 @@ function handleSession(session: Session, username: string): void {
 
     try {
       await claude.send(command, (chunk) => {
-        // Strip any markdown that leaks through
-        let sanitized = chunk
-          .replace(/```[\w]*\n?/g, "")
-          .replace(/\*\*(.*?)\*\*/g, "$1")
-          .replace(/`([^`]*)`/g, "$1");
-        // Convert newlines to terminal-friendly \r\n
-        sanitized = sanitized.replace(/\n/g, "\r\n");
-        stream.write(sanitized);
+        // The renderers produce \n — convert to \r\n for the terminal.
+        // No markdown sanitization needed. The typed tool schemas
+        // make markdown structurally impossible.
+        const terminalBytes = chunk.replace(/\n/g, "\r\n");
+        stream.write(terminalBytes);
       });
-
-      // Ensure we end on a new line with prompt
-      stream.write("\r\n");
     } catch (err: any) {
       writeToStream(
         stream,
-        `\r\n[SYSTEM ERROR] ${err.message}\r\n`
+        `[SYSTEM ERROR] ${err.message}\r\n`
       );
     }
 
+    writeToStream(stream, PROMPT);
     isProcessing = false;
   }
 }
 
+// ── Helpers ──────────────────────────────────────────────────────
+
 function writeToStream(stream: any, text: string): void {
-  // Normalize line endings for terminal
   const sanitized = text.replace(/\r?\n/g, "\r\n");
   stream.write(sanitized);
 }
 
-// --- Main ---
+// ── Main ─────────────────────────────────────────────────────────
+
 const server = createServer();
 
 server.listen(PORT, "0.0.0.0", () => {
