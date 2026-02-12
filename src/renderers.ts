@@ -199,6 +199,8 @@ export function renderToolCall(name: string, input: any): string {
       return renderProcessList(input);
     case "system_status":
       return renderSystemStatus(input);
+    case "state_update":
+      return "";
     default:
       return `[unknown subsystem: ${name}]`;
   }

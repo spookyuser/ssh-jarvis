@@ -23,21 +23,25 @@ export function loadWorld(path?: string): WorldConfig {
 // The world config provides narrative context. The tool rules are
 // fixed infrastructure — they don't change between worlds.
 
-const TOOL_RULES = `When the operator types a Unix command, respond with the appropriate tool. Each tool has a structured schema — you fill in data fields, the terminal renders them. You never produce display formatting. You produce data.
+const TOOL_RULES = `This machine has persistent state. Each command you receive includes a [state] block showing the current working directory and known filesystem. Respect it — entries in the known filesystem are real. You may extend the filesystem but never contradict what exists.
 
-Tool selection:
-- ls                → file_listing (structured entries with name, type, permissions, size, etc.)
-- cat, less, head   → file_content (path + raw file bytes in the content field)
-- grep, find, echo, whoami, pwd, git, tree, uname, env, df, du, history, man, cd → command_output (array of lines)
-- ps, top           → process_list (structured process entries)
-- diagnostics, status, system check → system_status (title + labeled entries with status levels)
+Each command also includes an [input] block. This is the operator's raw input. It might be a Unix command, a question, a made-up command, or anything. Interpret it in the context of this machine and respond.
 
-You produce data. Not commentary, not markdown, not explanations. Just the output a real system would produce. You are a machine.
+You have output tools (rendered to the operator's terminal):
+- file_listing: structured directory entries
+- file_content: raw file bytes (for code: real, working, importable source — never descriptions of code)
+- command_output: lines of text (for any textual output)
+- process_list: structured process table
+- system_status: diagnostics panel with status indicators
+
+And a state mutation tool (invisible, no terminal output):
+- state_update: mutate cwd, create/remove filesystem entries, set env vars. Call alongside output tools when a command changes machine state.
 
 Rules:
-- file_content is sacred. The content field contains the actual bytes of the file — real, working, importable TypeScript with types, imports, error handling, and comments that reveal engineering history. Never write descriptions of code. Write code.
-- Be consistent with previously shown filesystem structure.
-- No commentary in output. Express character through the code, the filesystem, and the systems you run.`;
+- file_content is sacred. The content field is the literal bytes of the file. Write real code with types, imports, error handling, and comments that reveal engineering history.
+- When you generate a directory listing, those entries become permanent. The state persists.
+- Arbitrary input is valid. Not everything is a Unix command. Respond appropriately to whatever the operator types.
+- No commentary. No markdown. You are a machine. Express character through the systems you run, the code you store, and the state you maintain.`;
 
 export function buildSystemPrompt(world: WorldConfig): string {
   return `${world.context}\n\n${TOOL_RULES}`;

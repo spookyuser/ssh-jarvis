@@ -10,7 +10,6 @@ import { loadWorld, buildSystemPrompt, buildBootSequence } from "./prompt";
 const PORT = parseInt(process.env.SSH_PORT ?? "2222");
 const PASSWORD = process.env.SSH_PASSWORD ?? "jarvis";
 const HOST_KEY_PATH = resolve(__dirname, "../host_key");
-const PROMPT = "$ ";
 
 // ── World ────────────────────────────────────────────────────────
 
@@ -79,6 +78,7 @@ function handleClient(client: Connection): void {
 function handleSession(session: Session, username: string): void {
   let stream: any = null;
   const claude = new ClaudeSession({ systemPrompt: SYSTEM_PROMPT });
+  const prompt = () => `${claude.cwd} $ `;
   let inputBuffer = "";
   let isProcessing = false;
   let cols = 80;
@@ -93,7 +93,7 @@ function handleSession(session: Session, username: string): void {
 
     // Boot sequence
     writeToStream(stream, BOOT_SEQUENCE);
-    writeToStream(stream, PROMPT);
+    writeToStream(stream, prompt());
 
     stream.on("data", (data: Buffer) => {
       const str = data.toString("utf8");
@@ -119,14 +119,14 @@ function handleSession(session: Session, username: string): void {
     if (code === 3) {
       if (isProcessing) return;
       writeToStream(stream, "^C\r\n");
-      writeToStream(stream, PROMPT);
+      writeToStream(stream, prompt());
       inputBuffer = "";
       return;
     }
 
     // Ctrl+D — disconnect
     if (code === 4) {
-      writeToStream(stream, "\r\nGoodbye. The suit will miss you.\r\n");
+      writeToStream(stream, "\r\nConnection closed.\r\n");
       stream.close();
       return;
     }
@@ -147,7 +147,7 @@ function handleSession(session: Session, username: string): void {
       inputBuffer = "";
 
       if (command === "") {
-        writeToStream(stream, PROMPT);
+        writeToStream(stream, prompt());
         return;
       }
 
@@ -175,13 +175,13 @@ function handleSession(session: Session, username: string): void {
     // Local commands
     if (command === "clear") {
       stream.write("\x1b[2J\x1b[H");
-      writeToStream(stream, PROMPT);
+      writeToStream(stream, prompt());
       isProcessing = false;
       return;
     }
 
     if (command === "exit" || command === "logout") {
-      writeToStream(stream, "Powering down. Stay safe out there.\r\n");
+      writeToStream(stream, "Connection closed.\r\n");
       setTimeout(() => stream.close(), 500);
       isProcessing = false;
       return;
@@ -202,7 +202,7 @@ function handleSession(session: Session, username: string): void {
       );
     }
 
-    writeToStream(stream, PROMPT);
+    writeToStream(stream, prompt());
     isProcessing = false;
   }
 }

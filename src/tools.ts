@@ -1,15 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 // ── Tool definitions ─────────────────────────────────────────────
-// Each tool has a tight schema. Claude fills in structured fields,
-// the server renders them into ANSI terminal bytes. Markdown cannot
-// exist because there is no free-text "output" blob.
+// Output tools have tight schemas — Claude fills in data fields,
+// the server renders them into ANSI terminal bytes.
+// state_update is invisible — it mutates the VM and produces no output.
 
 export const TOOLS: Anthropic.Tool[] = [
   {
     name: "file_listing",
-    description:
-      "Display a directory listing. Used when the operator runs ls.",
+    description: "Structured directory listing with entry metadata.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -57,9 +56,8 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "file_content",
     description:
-      "Display raw file contents. Used when the operator runs cat. " +
-      "The content field contains the literal bytes of the file. " +
-      "For code files: write real, working, importable code with types, " +
+      "Raw file contents. The content field is the literal bytes of " +
+      "the file. For code: real, working, importable source with types, " +
       "implementations, and comments that reveal engineering history. " +
       "Never describe code. Write it.",
     input_schema: {
@@ -86,8 +84,8 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "command_output",
     description:
-      "Generic command output. Used for grep, find, echo, whoami, " +
-      "uname, git, pwd, tree, and any command not covered by other tools.",
+      "Lines of text output. Use for any command or response that " +
+      "produces text — grep, find, git, echo, errors, or anything else.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -103,7 +101,7 @@ export const TOOLS: Anthropic.Tool[] = [
 
   {
     name: "process_list",
-    description: "Display running processes. Used when the operator runs ps.",
+    description: "Structured process table.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -135,8 +133,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "system_status",
     description:
-      "Display a diagnostics panel with box-drawing borders. " +
-      "Used for suit status, system checks, reactor diagnostics.",
+      "Diagnostics panel with box-drawing borders and status indicators.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -161,4 +158,53 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
 
+  {
+    name: "state_update",
+    description:
+      "Mutate machine state. Produces no visible output. Call alongside " +
+      "output tools when a command changes the filesystem, working " +
+      "directory, or environment (mkdir, rm, touch, mv, export, etc.).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        cwd: {
+          type: "string",
+          description: "New working directory (absolute path)",
+        },
+        create: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Absolute path" },
+              type: {
+                type: "string",
+                enum: ["file", "dir", "symlink"],
+              },
+              permissions: { type: "string" },
+              owner: { type: "string" },
+              size: { type: "string" },
+              modified: { type: "string" },
+              content: {
+                type: "string",
+                description: "File content, if creating with content",
+              },
+              language: { type: "string" },
+            },
+            required: ["path"],
+          },
+          description: "Filesystem entries to create or update",
+        },
+        remove: {
+          type: "array",
+          items: { type: "string" },
+          description: "Absolute paths to remove",
+        },
+        env: {
+          type: "object",
+          description: "Environment variables to set or update",
+        },
+      },
+    },
+  },
 ];
