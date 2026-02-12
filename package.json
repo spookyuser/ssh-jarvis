@@ -1,0 +1,28 @@
+{
+  "name": "ssh-jarvis",
+  "version": "1.0.0",
+  "description": "SSH into Iron Man's suit. JARVIS responds via Claude.",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node -r dotenv/config dist/server.js",
+    "dev": "tsc && node -r dotenv/config dist/server.js"
+  },
+  "keywords": [
+    "ssh",
+    "jarvis",
+    "claude",
+    "iron-man"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.74",
+    "dotenv": "^16.4.7",
+    "ssh2": "^1.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "@types/ssh2": "^1.15.4",
+    "typescript": "^5.7.3"
+  }
+}
