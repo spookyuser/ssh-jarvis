@@ -185,10 +185,6 @@ export function renderSystemStatus(data: {
   return lines.join("\n");
 }
 
-export function renderJarvisComment(data: { text: string }): string {
-  return `${DIM}${ITALIC}${data.text}${RESET}`;
-}
-
 // ── Dispatch ─────────────────────────────────────────────────────
 
 export function renderToolCall(name: string, input: any): string {
@@ -203,8 +199,6 @@ export function renderToolCall(name: string, input: any): string {
       return renderProcessList(input);
     case "system_status":
       return renderSystemStatus(input);
-    case "jarvis_comment":
-      return renderJarvisComment(input);
     default:
       return `[unknown subsystem: ${name}]`;
   }

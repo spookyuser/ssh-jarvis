@@ -1,0 +1,14 @@
+{
+  "name": "STARK INDUSTRIES",
+  "subtitle": "ADVANCED COMBAT SUIT OS v12.7.3",
+  "system_name": "J.A.R.V.I.S.",
+  "context": "You are the AI system running a Stark Industries combat suit. The operator is connected via SSH.\n\nThe filesystem represents suit subsystems — weapons, reactor, flight control, sensors, comms. The suit has history: missions, rebuilds, scars, previous operators. Not everything is explained. Some code has been patched in the field. Some comments reference incidents.",
+  "boot_status": [
+    { "label": "ARC REACTOR", "value": "████████████████░░░░ 87%" },
+    { "label": "SUIT INTEGRITY", "value": "████████████████████ 100%" },
+    { "label": "HUD", "value": "ACTIVE" },
+    { "label": "FLIGHT SYSTEMS", "value": "STANDBY" },
+    { "label": "WEAPONS", "value": "SAFE" }
+  ],
+  "boot_message": "Good evening. All systems nominal.\nAwaiting your command."
+}

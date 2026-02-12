@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from "fs";
 import { execSync } from "child_process";
 import { resolve } from "path";
 import { ClaudeSession } from "./claude";
-import { BOOT_SEQUENCE } from "./prompt";
+import { loadWorld, buildSystemPrompt, buildBootSequence } from "./prompt";
 
 // ── Config ───────────────────────────────────────────────────────
 
@@ -11,6 +11,12 @@ const PORT = parseInt(process.env.SSH_PORT ?? "2222");
 const PASSWORD = process.env.SSH_PASSWORD ?? "jarvis";
 const HOST_KEY_PATH = resolve(__dirname, "../host_key");
 const PROMPT = "$ ";
+
+// ── World ────────────────────────────────────────────────────────
+
+const world = loadWorld();
+const SYSTEM_PROMPT = buildSystemPrompt(world);
+const BOOT_SEQUENCE = buildBootSequence(world);
 
 // ── Host key ─────────────────────────────────────────────────────
 
@@ -72,7 +78,7 @@ function handleClient(client: Connection): void {
 
 function handleSession(session: Session, username: string): void {
   let stream: any = null;
-  const claude = new ClaudeSession();
+  const claude = new ClaudeSession({ systemPrompt: SYSTEM_PROMPT });
   let inputBuffer = "";
   let isProcessing = false;
   let cols = 80;

@@ -161,21 +161,4 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
 
-  {
-    name: "jarvis_comment",
-    description:
-      "A brief remark from JARVIS. Personality, warnings, commentary. " +
-      "1-3 sentences maximum. Use after other tools, or alone for " +
-      "conversational responses.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        text: {
-          type: "string",
-          description: "Plain text. No formatting.",
-        },
-      },
-      required: ["text"],
-    },
-  },
 ];

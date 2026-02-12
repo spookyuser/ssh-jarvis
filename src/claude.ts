@@ -1,6 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { TOOLS } from "./tools";
-import { SYSTEM_PROMPT } from "./prompt";
 import { renderToolCall } from "./renderers";
 
 // ── Types ────────────────────────────────────────────────────────
@@ -15,11 +14,13 @@ interface Message {
 export class ClaudeSession {
   private client: Anthropic;
   private messages: Message[] = [];
+  private systemPrompt: string;
   private maxTokens: number;
 
-  constructor(opts?: { maxTokens?: number }) {
+  constructor(opts: { systemPrompt: string; maxTokens?: number }) {
     this.client = new Anthropic();
-    this.maxTokens = opts?.maxTokens ?? 8192;
+    this.systemPrompt = opts.systemPrompt;
+    this.maxTokens = opts.maxTokens ?? 8192;
   }
 
   async send(
@@ -40,7 +41,7 @@ export class ClaudeSession {
     const stream = this.client.messages.stream({
       model: "claude-sonnet-4-20250514",
       max_tokens: this.maxTokens,
-      system: SYSTEM_PROMPT,
+      system: this.systemPrompt,
       messages: this.messages,
       tools: TOOLS,
       // "any" = must use at least one tool, but picks which.
